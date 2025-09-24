@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LogOut, Settings, Users, Search, MessageCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
+import Navigation from '../components/Navigation';
 
 const ChatPage = () => {
   const [selectedFriend, setSelectedFriend] = useState(null);
@@ -48,7 +49,9 @@ const ChatPage = () => {
   };
 
   return (
-    <div className="h-screen flex bg-white">
+    <div className="min-h-screen bg-gray-50">
+      <Navigation />
+      <div className="h-screen flex bg-white">
       {/* Sidebar */}
       <div className="w-80 bg-gray-50 border-r border-gray-200 flex flex-col">
         {/* Header */}
@@ -226,6 +229,7 @@ const ChatPage = () => {
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

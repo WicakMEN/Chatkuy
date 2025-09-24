@@ -139,6 +139,167 @@ const firestoreHelpers = {
       console.error('Error getting messages:', error);
       throw error;
     }
+  },
+
+  // Add Friend System Functions
+  
+  // Add friend (mutual friendship, no approval needed)
+  async addFriend(userUid, friendUid) {
+    try {
+      const collections = getCollections();
+      const db = getDB();
+      
+      // Check if users exist
+      const userDoc = await collections.users.doc(userUid).get();
+      const friendDoc = await collections.users.doc(friendUid).get();
+      
+      if (!userDoc.exists || !friendDoc.exists) {
+        throw new Error('User or friend not found');
+      }
+      
+      // Check if already friends
+      const userData = userDoc.data();
+      if (userData.friends && userData.friends.includes(friendUid)) {
+        throw new Error('Already friends');
+      }
+      
+      // Check if trying to add self
+      if (userUid === friendUid) {
+        throw new Error('Cannot add yourself as friend');
+      }
+      
+      const batch = db.batch();
+      
+      // Add friend to user's friends array
+      const userRef = collections.users.doc(userUid);
+      batch.update(userRef, {
+        friends: admin.firestore.FieldValue.arrayUnion(friendUid),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      // Add user to friend's friends array (mutual friendship)
+      const friendRef = collections.users.doc(friendUid);
+      batch.update(friendRef, {
+        friends: admin.firestore.FieldValue.arrayUnion(userUid),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      await batch.commit();
+      
+      return { 
+        success: true, 
+        message: 'Friend added successfully',
+        friendData: friendDoc.data()
+      };
+    } catch (error) {
+      console.error('Error adding friend:', error);
+      throw error;
+    }
+  },
+
+  // Get user's friends list with details
+  async getFriends(userUid) {
+    try {
+      const user = await this.getUser(userUid);
+      if (!user || !user.friends || user.friends.length === 0) {
+        return [];
+      }
+      
+      const collections = getCollections();
+      const friendsData = [];
+      
+      // Get friend details
+      for (const friendUid of user.friends) {
+        const friendDoc = await collections.users.doc(friendUid).get();
+        if (friendDoc.exists) {
+          friendsData.push({
+            uid: friendUid,
+            ...friendDoc.data()
+          });
+        }
+      }
+      
+      return friendsData;
+    } catch (error) {
+      console.error('Error getting friends:', error);
+      throw error;
+    }
+  },
+
+  // Check if two users are friends
+  async areFriends(userUid, friendUid) {
+    try {
+      const user = await this.getUser(userUid);
+      return user && user.friends && user.friends.includes(friendUid);
+    } catch (error) {
+      console.error('Error checking friendship:', error);
+      return false;
+    }
+  },
+
+  // Remove friend (mutual removal)
+  async removeFriend(userUid, friendUid) {
+    try {
+      const collections = getCollections();
+      const db = getDB();
+      
+      const batch = db.batch();
+      
+      // Remove friend from user's friends array
+      const userRef = collections.users.doc(userUid);
+      batch.update(userRef, {
+        friends: admin.firestore.FieldValue.arrayRemove(friendUid),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      // Remove user from friend's friends array
+      const friendRef = collections.users.doc(friendUid);
+      batch.update(friendRef, {
+        friends: admin.firestore.FieldValue.arrayRemove(userUid),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      await batch.commit();
+      
+      return { success: true, message: 'Friend removed successfully' };
+    } catch (error) {
+      console.error('Error removing friend:', error);
+      throw error;
+    }
+  },
+
+  // Search users by email (excluding current user)
+  async searchUserByEmailExcludingSelf(email, currentUserUid) {
+    try {
+      const user = await this.searchUserByEmail(email);
+      if (user && user.uid !== currentUserUid) {
+        return user;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error searching user by email:', error);
+      throw error;
+    }
+  },
+
+  // Get all users (for development/admin purposes)
+  async getAllUsers(limit = 20) {
+    try {
+      const collections = getCollections();
+      const usersSnapshot = await collections.users
+        .limit(limit)
+        .get();
+      
+      const users = usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      return users;
+    } catch (error) {
+      console.error('Error getting all users:', error);
+      throw error;
+    }
   }
 };
 

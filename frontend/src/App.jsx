@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
 import LoginPage from './pages/LoginPage';
 import ChatPage from './pages/ChatPage';
+import FriendsPage from './pages/FriendsPage';
 import LoadingSpinner from './components/LoadingSpinner';
 
 // Protected Route component
@@ -56,8 +57,17 @@ function App() {
               } 
             />
             
+            <Route 
+              path="/friends" 
+              element={
+                <ProtectedRoute>
+                  <FriendsPage />
+                </ProtectedRoute>
+              } 
+            />
+            
             {/* Default redirect */}
-            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/" element={<Navigate to="/friends" replace />} />
             
             {/* 404 fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
