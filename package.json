@@ -1,0 +1,13 @@
+{
+  "name": "chatkuy",
+  "version": "1.0.0",
+  "description": "Modern minimalist chat application",
+  "main": "index.html",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "dev": "python3 -m http.server 8000"
+  },
+  "keywords": ["chat", "minimalist", "modern", "web", "javascript"],
+  "author": "WicakMEN",
+  "license": "MIT"
+}
