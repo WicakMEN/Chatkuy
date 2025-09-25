@@ -17,6 +17,23 @@ const socketAuth = require("./sockets/auth");
 const chatSocket = require("./sockets/chat");
 
 const app = express();
+
+// Debug middleware untuk melihat semua request
+app.use((req, res, next) => {
+  console.log(`🌐 ${req.method} ${req.url}`);
+  console.log(`🔍 Content-Type:`, req.headers['content-type']);
+  console.log(`🔍 Headers:`, JSON.stringify(req.headers, null, 2));
+  next();
+});
+
+app.use(express.json());
+
+// Debug middleware untuk melihat parsed body
+app.use((req, res, next) => {
+  console.log(`📦 Parsed Body:`, JSON.stringify(req.body, null, 2));
+  next();
+});
+
 const server = http.createServer(app);
 
 // Configure CORS

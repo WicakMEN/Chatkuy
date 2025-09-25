@@ -67,10 +67,17 @@ router.get("/search", async (req, res) => {
 // Add friend
 router.post("/add", async (req, res) => {
   try {
+    console.log("➕ Add friend - Request body:", req.body);
+    console.log("➕ Add friend - User:", req.user.email);
+    
     const { friendUid } = req.body;
     const currentUserUid = req.user.uid;
 
+    console.log("➕ Add friend - friendUid from body:", friendUid);
+    console.log("➕ Add friend - currentUserUid:", currentUserUid);
+
     if (!friendUid) {
+      console.log("❌ Add friend - No friendUid provided");
       return res.status(400).json({
         success: false,
         message: "Friend UID is required",
