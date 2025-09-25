@@ -1,113 +1,263 @@
-const { saveMessage, getMessages } = require('../config/firestore');
+const {
+  saveMessage,
+  getMessages,
+  createOrGetChatRoom,
+  areFriends,
+} = require("../config/firestore");
 
-// Socket.IO chat event handlers
+// Handler untuk semua event chat di Socket.IO
 const chatSocket = (io, socket) => {
-  
-  // Handle sending messages
-  socket.on('send_message', async (data) => {
+  console.log(
+    `💬 Chat socket handler initialized untuk user: ${socket.userId} (${socket.userEmail})`
+  );
+
+  // Event: Kirim pesan baru
+  socket.on("send_message", async (data) => {
+    console.log(
+      `📤 [SEND MESSAGE] User ${socket.userId} mencoba kirim pesan:`,
+      data
+    );
+
     try {
-      const { receiverId, content } = data;
+      const { receiverId, content, messageType = "text" } = data;
       const senderId = socket.userId;
-      
+
+      // Validasi input
       if (!receiverId || !content) {
-        socket.emit('error', { message: 'Receiver ID and content are required' });
+        console.log(
+          `❌ [SEND MESSAGE] Validasi gagal - receiverId: ${receiverId}, content: ${content}`
+        );
+        socket.emit("message_error", {
+          message: "ID penerima dan konten pesan wajib diisi",
+          code: "INVALID_INPUT",
+        });
         return;
       }
-      
-      // Save message to Firestore
-      const messageId = await saveMessage(senderId, receiverId, content);
-      
-      const messageData = {
-        id: messageId,
+
+      // Cek apakah mereka berteman
+      const isFriends = await areFriends(senderId, receiverId);
+      if (!isFriends) {
+        console.log(
+          `❌ [SEND MESSAGE] User ${senderId} dan ${receiverId} bukan teman`
+        );
+        socket.emit("message_error", {
+          message: "Hanya bisa mengirim pesan ke teman",
+          code: "NOT_FRIENDS",
+        });
+        return;
+      }
+
+      // Buat atau dapatkan chat room
+      const chatRoomId = await createOrGetChatRoom(senderId, receiverId);
+      console.log(`💬 [SEND MESSAGE] Chat room ID: ${chatRoomId}`);
+
+      // Simpan pesan ke database
+      const messageData = await saveMessage({
         senderId,
         receiverId,
         content,
-        createdAt: new Date(),
-        senderName: socket.userName,
-        senderPhoto: socket.userPhoto
-      };
-      
-      // Send message to receiver if they're online
-      io.to(receiverId).emit('receive_message', messageData);
-      
-      // Send confirmation back to sender
-      socket.emit('message_sent', messageData);
-      
-      console.log(`Message sent from ${senderId} to ${receiverId}`);
-      
+        messageType,
+        chatRoomId,
+      });
+
+      console.log(
+        `✅ [SEND MESSAGE] Pesan berhasil disimpan dengan ID: ${messageData.id}`
+      );
+
+      // Kirim pesan ke penerima (jika online)
+      const isReceiverOnline = io.sockets.adapter.rooms.has(receiverId);
+      console.log(
+        `🔍 [SEND MESSAGE] Status penerima ${receiverId}: ${
+          isReceiverOnline ? "ONLINE" : "OFFLINE"
+        }`
+      );
+
+      if (isReceiverOnline) {
+        io.to(receiverId).emit("receive_message", {
+          ...messageData,
+          senderName: socket.userName,
+          senderPhoto: socket.userPhoto,
+        });
+        console.log(
+          `📨 [SEND MESSAGE] Pesan dikirim ke penerima ${receiverId}`
+        );
+      }
+
+      // Kirim konfirmasi ke pengirim
+      socket.emit("message_sent", {
+        ...messageData,
+        status: "sent",
+        deliveredAt: new Date().toISOString(),
+      });
+
+      console.log(
+        `🎉 [SEND MESSAGE] Berhasil! Pesan dari ${senderId} ke ${receiverId}`
+      );
     } catch (error) {
-      console.error('Send message error:', error);
-      socket.emit('error', { message: 'Failed to send message' });
+      console.error(`❌ [SEND MESSAGE] Error:`, error);
+      socket.emit("message_error", {
+        message: "Gagal mengirim pesan",
+        code: "SEND_FAILED",
+        details: error.message,
+      });
     }
   });
-  
-  // Handle getting message history
-  socket.on('get_messages', async (data) => {
+
+  // Event: Ambil riwayat pesan
+  socket.on("get_messages", async (data) => {
+    console.log(
+      `📋 [GET MESSAGES] User ${socket.userId} minta riwayat pesan:`,
+      data
+    );
+
     try {
-      const { friendId, limit = 50 } = data;
+      const { friendId, limit = 50, lastMessageId = null } = data;
       const userId = socket.userId;
-      
+
       if (!friendId) {
-        socket.emit('error', { message: 'Friend ID is required' });
+        console.log(`❌ [GET MESSAGES] Friend ID tidak ada`);
+        socket.emit("messages_error", {
+          message: "ID teman wajib diisi",
+          code: "INVALID_FRIEND_ID",
+        });
         return;
       }
-      
-      // Get messages between user and friend
-      const messages = await getMessages(userId, friendId, limit);
-      
-      socket.emit('messages_history', {
+
+      // Cek apakah mereka berteman
+      const isFriends = await areFriends(userId, friendId);
+      if (!isFriends) {
+        console.log(
+          `❌ [GET MESSAGES] User ${userId} dan ${friendId} bukan teman`
+        );
+        socket.emit("messages_error", {
+          message: "Hanya bisa melihat pesan dengan teman",
+          code: "NOT_FRIENDS",
+        });
+        return;
+      }
+
+      // Ambil pesan dari database
+      const messages = await getMessages(
+        userId,
         friendId,
-        messages
+        limit,
+        lastMessageId
+      );
+      console.log(
+        `📨 [GET MESSAGES] Ditemukan ${messages.length} pesan untuk chat ${userId}-${friendId}`
+      );
+
+      socket.emit("messages_history", {
+        friendId,
+        messages,
+        hasMore: messages.length === limit,
+        lastMessageId:
+          messages.length > 0 ? messages[messages.length - 1].id : null,
       });
-      
-      console.log(`Message history sent to ${userId} for chat with ${friendId}`);
-      
+
+      console.log(
+        `✅ [GET MESSAGES] Riwayat pesan berhasil dikirim ke ${userId}`
+      );
     } catch (error) {
-      console.error('Get messages error:', error);
-      socket.emit('error', { message: 'Failed to get messages' });
-    }
-  });
-  
-  // Handle user typing indicator
-  socket.on('typing_start', (data) => {
-    const { receiverId } = data;
-    if (receiverId) {
-      io.to(receiverId).emit('user_typing', {
-        userId: socket.userId,
-        userName: socket.userName,
-        isTyping: true
+      console.error(`❌ [GET MESSAGES] Error:`, error);
+      socket.emit("messages_error", {
+        message: "Gagal mengambil riwayat pesan",
+        code: "FETCH_FAILED",
+        details: error.message,
       });
     }
   });
-  
-  socket.on('typing_stop', (data) => {
+
+  // Event: User mulai mengetik
+  socket.on("typing_start", (data) => {
     const { receiverId } = data;
+    console.log(
+      `⌨️ [TYPING START] ${socket.userId} mulai mengetik ke ${receiverId}`
+    );
+
     if (receiverId) {
-      io.to(receiverId).emit('user_typing', {
+      io.to(receiverId).emit("user_typing", {
         userId: socket.userId,
         userName: socket.userName,
-        isTyping: false
+        isTyping: true,
       });
     }
   });
-  
-  // Handle user online status
-  socket.on('user_online', () => {
-    socket.broadcast.emit('user_status', {
+
+  // Event: User berhenti mengetik
+  socket.on("typing_stop", (data) => {
+    const { receiverId } = data;
+    console.log(
+      `⌨️ [TYPING STOP] ${socket.userId} berhenti mengetik ke ${receiverId}`
+    );
+
+    if (receiverId) {
+      io.to(receiverId).emit("user_typing", {
+        userId: socket.userId,
+        userName: socket.userName,
+        isTyping: false,
+      });
+    }
+  });
+
+  // Event: User online
+  socket.on("user_online", () => {
+    console.log(
+      `🟢 [USER ONLINE] ${socket.userId} (${socket.userName}) online`
+    );
+    socket.broadcast.emit("user_status", {
       userId: socket.userId,
       userName: socket.userName,
-      status: 'online'
+      status: "online",
+      timestamp: new Date().toISOString(),
     });
   });
-  
-  // Handle disconnect
-  socket.on('disconnect', () => {
-    socket.broadcast.emit('user_status', {
+
+  // Event: Tandai pesan sudah dibaca
+  socket.on("mark_as_read", async (data) => {
+    console.log(
+      `👀 [MARK READ] User ${socket.userId} tandai pesan dibaca:`,
+      data
+    );
+
+    try {
+      const { messageId, senderId } = data;
+
+      if (!messageId || !senderId) {
+        console.log(`❌ [MARK READ] Data tidak lengkap`);
+        return;
+      }
+
+      // Update status pesan di database (implementasi bisa ditambahkan di firestore.js)
+      // await markMessageAsRead(messageId, socket.userId);
+
+      // Kirim notifikasi ke pengirim bahwa pesan sudah dibaca
+      io.to(senderId).emit("message_read", {
+        messageId,
+        readBy: socket.userId,
+        readAt: new Date().toISOString(),
+      });
+
+      console.log(
+        `✅ [MARK READ] Pesan ${messageId} ditandai sudah dibaca oleh ${socket.userId}`
+      );
+    } catch (error) {
+      console.error(`❌ [MARK READ] Error:`, error);
+    }
+  });
+
+  // Event: User disconnect
+  socket.on("disconnect", () => {
+    console.log(
+      `🔴 [DISCONNECT] User ${socket.userId} (${socket.userName}) disconnect`
+    );
+
+    socket.broadcast.emit("user_status", {
       userId: socket.userId,
       userName: socket.userName,
-      status: 'offline'
+      status: "offline",
+      timestamp: new Date().toISOString(),
     });
-    console.log(`User ${socket.userId} disconnected`);
   });
 };
 

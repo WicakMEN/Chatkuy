@@ -1,56 +1,75 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 
-// Create SocketContext
+// Buat SocketContext untuk mengelola koneksi real-time
 const SocketContext = createContext({});
 
-// Custom hook to use SocketContext
+// Custom hook untuk menggunakan SocketContext
 export const useSocket = () => {
   const context = useContext(SocketContext);
   if (!context) {
-    throw new Error('useSocket must be used within a SocketProvider');
+    throw new Error('useSocket harus digunakan di dalam SocketProvider');
   }
   return context;
 };
 
-// SocketProvider component
+// SocketProvider component - Provider untuk socket connection
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
+  const [messages, setMessages] = useState({}); // Format: { friendId: [messages] }
+  const [typingUsers, setTypingUsers] = useState({}); // Format: { userId: true/false }
   const { user, idToken } = useAuth();
 
+  // Setup socket connection saat user login
   useEffect(() => {
     if (user && idToken) {
-      // Initialize socket connection with authentication
-      const newSocket = io('http://localhost:3001', {
+      console.log('🔌 [SOCKET] Menghubungkan socket untuk user:', user.email);
+      
+      // Inisialisasi koneksi socket dengan autentikasi
+      const newSocket = io(import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001', {
         auth: {
           token: idToken
-        }
+        },
+        transports: ['websocket', 'polling'], // Fallback transport
+        reconnection: true, // Auto reconnect
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
       });
 
+      // Event: Berhasil terhubung
       newSocket.on('connect', () => {
-        console.log('Connected to server');
+        console.log('✅ [SOCKET] Berhasil terhubung ke server');
         setConnected(true);
         
-        // Emit user online status
+        // Emit status user online
         newSocket.emit('user_online');
       });
 
-      newSocket.on('disconnect', () => {
-        console.log('Disconnected from server');
+      // Event: Koneksi terputus
+      newSocket.on('disconnect', (reason) => {
+        console.log('🔴 [SOCKET] Koneksi terputus:', reason);
         setConnected(false);
       });
 
+      // Event: Error koneksi
       newSocket.on('connect_error', (error) => {
-        console.error('Socket connection error:', error);
+        console.error('❌ [SOCKET] Error koneksi:', error);
         setConnected(false);
       });
 
-      // Handle user status updates
+      // Event: Reconnecting
+      newSocket.on('reconnect', (attemptNumber) => {
+        console.log('🔄 [SOCKET] Reconnected setelah', attemptNumber, 'percobaan');
+        setConnected(true);
+        newSocket.emit('user_online');
+      });
+
+      // Event: Update status user (online/offline)
       newSocket.on('user_status', (data) => {
-        console.log('User status update:', data);
+        console.log('👤 [SOCKET] Update status user:', data);
         setOnlineUsers(prev => {
           if (data.status === 'online') {
             return [...prev.filter(u => u.userId !== data.userId), data];
@@ -60,51 +79,217 @@ export const SocketProvider = ({ children }) => {
         });
       });
 
+      // Event: Terima pesan baru
+      newSocket.on('receive_message', (messageData) => {
+        console.log('📨 [SOCKET] Terima pesan baru:', messageData);
+        
+        // Tambahkan pesan ke state messages
+        setMessages(prev => {
+          const senderId = messageData.senderId;
+          const currentMessages = prev[senderId] || [];
+          
+          // Cek duplikasi berdasarkan ID pesan
+          const isDuplicate = currentMessages.some(msg => msg.id === messageData.id);
+          if (isDuplicate) {
+            console.log('⚠️ [SOCKET] Pesan duplikat diabaikan:', messageData.id);
+            return prev;
+          }
+          
+          return {
+            ...prev,
+            [senderId]: [...currentMessages, messageData]
+          };
+        });
+
+        // Play notification sound (opsional)
+        // playNotificationSound();
+      });
+
+      // Event: Konfirmasi pesan terkirim
+      newSocket.on('message_sent', (messageData) => {
+        console.log('✅ [SOCKET] Pesan berhasil terkirim:', messageData);
+        
+        // Update status pesan di UI jadi "sent"
+        setMessages(prev => {
+          const receiverId = messageData.receiverId;
+          const currentMessages = prev[receiverId] || [];
+          
+          return {
+            ...prev,
+            [receiverId]: currentMessages.map(msg => 
+              msg.tempId === messageData.tempId 
+                ? { ...messageData, status: 'sent' }
+                : msg
+            )
+          };
+        });
+      });
+
+      // Event: Riwayat pesan
+      newSocket.on('messages_history', (data) => {
+        console.log('📋 [SOCKET] Terima riwayat pesan:', data);
+        
+        setMessages(prev => ({
+          ...prev,
+          [data.friendId]: data.messages
+        }));
+      });
+
+      // Event: User sedang mengetik
+      newSocket.on('user_typing', (data) => {
+        console.log('⌨️ [SOCKET] User typing:', data);
+        
+        setTypingUsers(prev => ({
+          ...prev,
+          [data.userId]: data.isTyping
+        }));
+
+        // Auto clear typing setelah 3 detik
+        if (data.isTyping) {
+          setTimeout(() => {
+            setTypingUsers(prev => ({
+              ...prev,
+              [data.userId]: false
+            }));
+          }, 3000);
+        }
+      });
+
+      // Event: Error pesan
+      newSocket.on('message_error', (error) => {
+        console.error('❌ [SOCKET] Error pesan:', error);
+        alert(`Error: ${error.message}`);
+      });
+
+      // Event: Error messages
+      newSocket.on('messages_error', (error) => {
+        console.error('❌ [SOCKET] Error mengambil pesan:', error);
+      });
+
+      // Event: Pesan sudah dibaca
+      newSocket.on('message_read', (data) => {
+        console.log('👀 [SOCKET] Pesan sudah dibaca:', data);
+        
+        // Update status pesan di UI
+        setMessages(prev => {
+          const updatedMessages = {};
+          
+          Object.keys(prev).forEach(friendId => {
+            updatedMessages[friendId] = prev[friendId].map(msg => 
+              msg.id === data.messageId 
+                ? { ...msg, isRead: true, readAt: data.readAt }
+                : msg
+            );
+          });
+          
+          return updatedMessages;
+        });
+      });
+
       setSocket(newSocket);
 
+      // Cleanup saat component unmount
       return () => {
+        console.log('🔌 [SOCKET] Menutup koneksi socket');
         newSocket.close();
         setSocket(null);
         setConnected(false);
+        setMessages({});
+        setTypingUsers({});
       };
     }
   }, [user, idToken]);
 
-  // Send message function
-  const sendMessage = (receiverId, content) => {
-    if (socket && connected) {
-      socket.emit('send_message', { receiverId, content });
+  // Fungsi: Kirim pesan
+  const sendMessage = useCallback((receiverId, content, messageType = 'text') => {
+    if (!socket || !connected) {
+      console.error('❌ [SOCKET] Tidak dapat mengirim pesan - socket tidak terhubung');
+      return;
     }
-  };
 
-  // Get message history function
-  const getMessages = (friendId, limit = 50) => {
-    if (socket && connected) {
-      socket.emit('get_messages', { friendId, limit });
+    console.log(`📤 [SOCKET] Mengirim pesan ke ${receiverId}:`, content);
+
+    // Buat temporary ID untuk optimistic UI
+    const tempId = `temp_${Date.now()}_${Math.random()}`;
+    
+    // Tambahkan pesan ke UI secara optimistic
+    const optimisticMessage = {
+      id: tempId,
+      tempId,
+      senderId: user.uid,
+      receiverId,
+      content,
+      messageType,
+      createdAt: new Date().toISOString(),
+      status: 'sending' // Status sementara
+    };
+
+    setMessages(prev => ({
+      ...prev,
+      [receiverId]: [...(prev[receiverId] || []), optimisticMessage]
+    }));
+
+    // Kirim pesan ke server
+    socket.emit('send_message', { receiverId, content, messageType, tempId });
+    
+  }, [socket, connected, user?.uid]);
+
+  // Fungsi: Ambil riwayat pesan
+  const getMessages = useCallback((friendId, limit = 50) => {
+    if (!socket || !connected) {
+      console.error('❌ [SOCKET] Tidak dapat mengambil pesan - socket tidak terhubung');
+      return;
     }
-  };
 
-  // Typing indicators
-  const startTyping = (receiverId) => {
-    if (socket && connected) {
-      socket.emit('typing_start', { receiverId });
-    }
-  };
+    console.log(`📋 [SOCKET] Mengambil riwayat pesan dengan ${friendId}`);
+    socket.emit('get_messages', { friendId, limit });
+  }, [socket, connected]);
 
-  const stopTyping = (receiverId) => {
-    if (socket && connected) {
-      socket.emit('typing_stop', { receiverId });
-    }
-  };
+  // Fungsi: Mulai mengetik
+  const startTyping = useCallback((receiverId) => {
+    if (!socket || !connected) return;
+    
+    console.log(`⌨️ [SOCKET] Mulai mengetik ke ${receiverId}`);
+    socket.emit('typing_start', { receiverId });
+  }, [socket, connected]);
 
+  // Fungsi: Berhenti mengetik
+  const stopTyping = useCallback((receiverId) => {
+    if (!socket || !connected) return;
+    
+    console.log(`⌨️ [SOCKET] Berhenti mengetik ke ${receiverId}`);
+    socket.emit('typing_stop', { receiverId });
+  }, [socket, connected]);
+
+  // Fungsi: Tandai pesan sudah dibaca
+  const markAsRead = useCallback((messageId, senderId) => {
+    if (!socket || !connected) return;
+    
+    console.log(`👀 [SOCKET] Tandai pesan ${messageId} sudah dibaca`);
+    socket.emit('mark_as_read', { messageId, senderId });
+  }, [socket, connected]);
+
+  // Fungsi: Clear messages untuk friend tertentu
+  const clearMessages = useCallback((friendId) => {
+    setMessages(prev => ({
+      ...prev,
+      [friendId]: []
+    }));
+  }, []);
+
+  // Value yang akan diberikan ke context consumer
   const value = {
     socket,
     connected,
     onlineUsers,
+    messages,
+    typingUsers,
     sendMessage,
     getMessages,
     startTyping,
-    stopTyping
+    stopTyping,
+    markAsRead,
+    clearMessages
   };
 
   return (

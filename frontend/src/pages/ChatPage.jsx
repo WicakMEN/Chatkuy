@@ -1,235 +1,320 @@
-import React, { useState } from 'react';
-import { LogOut, Settings, Users, Search, MessageCircle } from 'lucide-react';
+﻿import React, { useState, useEffect, useRef } from 'react';
+import { LogOut, Users, MessageCircle, Send } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import Navigation from '../components/Navigation';
+import { apiCallWithAuth } from '../utils/api';
 
 const ChatPage = () => {
+  // State untuk komponen chat
   const [selectedFriend, setSelectedFriend] = useState(null);
-  const [searchEmail, setSearchEmail] = useState('');
-  const [searchResult, setSearchResult] = useState(null);
-  const [searching, setSearching] = useState(false);
-  const { user, logout, idToken } = useAuth();
-  const { connected, onlineUsers } = useSocket();
+  const [friends, setFriends] = useState([]);
+  const [messageText, setMessageText] = useState('');
+  const [loadingFriends, setLoadingFriends] = useState(true);
+  
+  // Ref untuk auto scroll
+  const messagesEndRef = useRef(null);
+  
+  // Context hooks
+  const { user, logout } = useAuth();
+  const { 
+    connected, 
+    onlineUsers, 
+    messages, 
+    sendMessage, 
+    getMessages 
+  } = useSocket();
 
+  // Auto scroll ke pesan terbaru
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Load daftar teman saat component mount
+  useEffect(() => {
+    loadFriends();
+  }, []);
+
+  // Load riwayat pesan saat pilih teman
+  useEffect(() => {
+    if (selectedFriend) {
+      console.log(`📋 [CHAT PAGE] Memuat pesan untuk teman: ${selectedFriend.uid}`);
+      getMessages(selectedFriend.uid);
+    }
+  }, [selectedFriend, getMessages]);
+
+  // Auto scroll saat ada pesan baru
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // Fungsi: Load daftar teman
+  const loadFriends = async () => {
+    try {
+      console.log('👥 [CHAT PAGE] Memuat daftar teman...');
+      setLoadingFriends(true);
+      
+      const response = await apiCallWithAuth('/api/friends/list', {}, user);
+      
+      if (response.success) {
+        setFriends(response.friends || []);
+        console.log(`✅ [CHAT PAGE] Berhasil memuat ${response.friends?.length || 0} teman`);
+      }
+    } catch (error) {
+      console.error('❌ [CHAT PAGE] Error memuat teman:', error);
+    } finally {
+      setLoadingFriends(false);
+    }
+  };
+
+  // Fungsi: Handle logout
   const handleLogout = async () => {
     try {
       await logout();
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('❌ [CHAT PAGE] Logout error:', error);
     }
   };
 
-  const handleSearchUser = async (e) => {
+  // Fungsi: Kirim pesan
+  const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!searchEmail.trim()) return;
-
-    try {
-      setSearching(true);
-      const response = await fetch(`http://localhost:3001/api/users/search?email=${encodeURIComponent(searchEmail)}`, {
-        headers: {
-          'Authorization': `Bearer ${idToken}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSearchResult(data.user);
-      } else {
-        const error = await response.json();
-        alert(error.message || 'User not found');
-        setSearchResult(null);
-      }
-    } catch (error) {
-      console.error('Search error:', error);
-      alert('Failed to search user');
-    } finally {
-      setSearching(false);
+    
+    if (!messageText.trim() || !selectedFriend) {
+      return;
     }
+
+    console.log(`📤 [CHAT PAGE] Mengirim pesan ke ${selectedFriend.displayName}: ${messageText}`);
+    
+    // Kirim pesan via socket
+    sendMessage(selectedFriend.uid, messageText.trim());
+    
+    // Clear input
+    setMessageText('');
   };
+
+  // Fungsi: Check apakah user sedang online
+  const isUserOnline = (userId) => {
+    return onlineUsers.some(user => user.userId === userId);
+  };
+
+  // Get current friend's messages
+  const currentMessages = selectedFriend ? (messages[selectedFriend.uid] || []) : [];
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Navigation />
       <div className="h-screen flex bg-white">
-      {/* Sidebar */}
-      <div className="w-80 bg-gray-50 border-r border-gray-200 flex flex-col">
-        {/* Header */}
-        <div className="p-4 border-b border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <div className="bg-primary-600 p-2 rounded-full mr-3">
-                <MessageCircle className="h-5 w-5 text-white" />
+        {/* Sidebar - Daftar Teman */}
+        <div className="w-80 bg-gray-50 border-r border-gray-200 flex flex-col">
+          {/* Header */}
+          <div className="p-4 border-b border-gray-200">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center">
+                <div className="bg-blue-600 p-2 rounded-full mr-3">
+                  <MessageCircle className="h-5 w-5 text-white" />
+                </div>
+                <h1 className="text-xl font-bold text-gray-900">ChatKuy</h1>
               </div>
-              <h1 className="text-xl font-bold text-gray-900">ChatKuy</h1>
+              <div className="flex items-center space-x-2">
+                <button 
+                  onClick={() => window.location.href = '/friends'}
+                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-md"
+                  title="Kelola Teman"
+                >
+                  <Users className="h-4 w-4" />
+                </button>
+                <button 
+                  onClick={handleLogout}
+                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-md"
+                  title="Logout"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-md">
-                <Settings className="h-4 w-4" />
-              </button>
-              <button 
-                onClick={handleLogout}
-                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-md"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
 
-          {/* User Info */}
-          <div className="flex items-center mb-4">
-            <img
-              src={user?.photoURL || '/default-avatar.png'}
-              alt={user?.displayName}
-              className="w-10 h-10 rounded-full mr-3"
-            />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">
-                {user?.displayName}
-              </p>
-              <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-            </div>
-            <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-400' : 'bg-gray-400'}`}></div>
-          </div>
-
-          {/* Search Users */}
-          <form onSubmit={handleSearchUser} className="mb-4">
-            <div className="relative">
-              <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-              <input
-                type="email"
-                placeholder="Search friends by email..."
-                value={searchEmail}
-                onChange={(e) => setSearchEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+            {/* User Info */}
+            <div className="flex items-center">
+              <img
+                src={user?.photoURL || '/default-avatar.png'}
+                alt={user?.displayName}
+                className="w-10 h-10 rounded-full mr-3"
               />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">
+                  {user?.displayName}
+                </p>
+                <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+              </div>
+              <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-400' : 'bg-gray-400'}`}></div>
             </div>
-            {searching && (
-              <div className="mt-2 text-xs text-gray-500">Searching...</div>
-            )}
-          </form>
+          </div>
 
-          {/* Search Result */}
-          {searchResult && (
-            <div className="mb-4 p-3 bg-white rounded-md border border-gray-200">
-              <div className="flex items-center justify-between">
+          {/* Daftar Teman */}
+          <div className="flex-1 overflow-y-auto">
+            {loadingFriends ? (
+              <div className="p-4 text-center">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="text-sm text-gray-500 mt-2">Memuat teman...</p>
+              </div>
+            ) : friends.length === 0 ? (
+              <div className="p-4 text-center">
+                <Users className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-sm text-gray-500">Belum ada teman</p>
+                <button 
+                  onClick={() => window.location.href = '/friends'}
+                  className="text-blue-600 text-sm font-medium mt-2 hover:underline"
+                >
+                  Tambah Teman
+                </button>
+              </div>
+            ) : (
+              <div className="py-2">
+                {friends.map(friend => (
+                  <div
+                    key={friend.uid}
+                    onClick={() => setSelectedFriend(friend)}
+                    className={`flex items-center p-3 hover:bg-gray-100 cursor-pointer border-l-4 ${
+                      selectedFriend?.uid === friend.uid 
+                        ? 'bg-blue-50 border-blue-500' 
+                        : 'border-transparent'
+                    }`}
+                  >
+                    <div className="relative">
+                      <img
+                        src={friend.photoURL || '/default-avatar.png'}
+                        alt={friend.displayName}
+                        className="w-12 h-12 rounded-full"
+                      />
+                      {/* Online indicator */}
+                      <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${
+                        isUserOnline(friend.uid) ? 'bg-green-400' : 'bg-gray-300'
+                      }`}></div>
+                    </div>
+                    <div className="ml-3 flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {friend.displayName}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {isUserOnline(friend.uid) ? 'Online' : 'Offline'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Area Chat */}
+        <div className="flex-1 flex flex-col">
+          {selectedFriend ? (
+            <>
+              {/* Header Chat */}
+              <div className="bg-white border-b border-gray-200 px-6 py-4">
                 <div className="flex items-center">
                   <img
-                    src={searchResult.photoURL || '/default-avatar.png'}
-                    alt={searchResult.displayName}
-                    className="w-8 h-8 rounded-full mr-2"
+                    src={selectedFriend.photoURL || '/default-avatar.png'}
+                    alt={selectedFriend.displayName}
+                    className="w-10 h-10 rounded-full mr-3"
                   />
                   <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {searchResult.displayName}
+                    <h2 className="text-lg font-semibold text-gray-900">
+                      {selectedFriend.displayName}
+                    </h2>
+                    <p className="text-sm text-gray-500">
+                      {isUserOnline(selectedFriend.uid) ? 'Online' : 'Offline'}
                     </p>
-                    <p className="text-xs text-gray-500">{searchResult.email}</p>
                   </div>
                 </div>
-                <button className="px-3 py-1 bg-primary-600 text-white text-xs rounded-md hover:bg-primary-700">
-                  Add Friend
-                </button>
+              </div>
+
+              {/* Area Pesan */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+                {currentMessages.length === 0 ? (
+                  <div className="text-center text-gray-500 mt-20">
+                    <MessageCircle className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                    <p>Mulai percakapan dengan {selectedFriend.displayName}</p>
+                  </div>
+                ) : (
+                  currentMessages.map((message) => {
+                    const isMe = message.senderId === user?.uid;
+                    
+                    return (
+                      <div
+                        key={message.id || message.tempId}
+                        className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                          isMe 
+                            ? 'bg-blue-600 text-white' 
+                            : 'bg-white text-gray-900 border'
+                        }`}>
+                          <p className="text-sm">{message.content}</p>
+                          <p className={`text-xs mt-1 ${
+                            isMe ? 'text-blue-200' : 'text-gray-400'
+                          }`}>
+                            {new Date(message.createdAt).toLocaleTimeString('id-ID', { 
+                              hour: '2-digit', 
+                              minute: '2-digit' 
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Form Input Pesan */}
+              <div className="bg-white border-t border-gray-200 p-4">
+                <form onSubmit={handleSendMessage} className="flex items-center space-x-3">
+                  <input
+                    type="text"
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    placeholder={`Ketik pesan untuk ${selectedFriend.displayName}...`}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!messageText.trim() || !connected}
+                    className={`p-2 rounded-full ${
+                      messageText.trim() && connected
+                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
+                  >
+                    <Send className="h-6 w-6" />
+                  </button>
+                </form>
+              </div>
+            </>
+          ) : (
+            /* Placeholder saat belum pilih teman */
+            <div className="flex-1 flex items-center justify-center bg-gray-50">
+              <div className="text-center">
+                <MessageCircle className="h-24 w-24 text-gray-300 mx-auto mb-6" />
+                <h2 className="text-2xl font-semibold text-gray-600 mb-2">
+                  ChatKuy
+                </h2>
+                <p className="text-gray-500 mb-6">
+                  Pilih teman untuk memulai percakapan
+                </p>
+                {friends.length === 0 && (
+                  <button
+                    onClick={() => window.location.href = '/friends'}
+                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Tambah Teman
+                  </button>
+                )}
               </div>
             </div>
           )}
         </div>
-
-        {/* Friends List */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-4">
-            <div className="flex items-center mb-3">
-              <Users className="h-4 w-4 text-gray-500 mr-2" />
-              <h2 className="text-sm font-medium text-gray-700">Friends</h2>
-              <span className="ml-auto text-xs text-gray-500">
-                {onlineUsers.length} online
-              </span>
-            </div>
-            
-            {/* No friends message */}
-            <div className="text-center py-8">
-              <Users className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-sm text-gray-500 mb-2">No friends yet</p>
-              <p className="text-xs text-gray-400">
-                Search for friends by email to start chatting
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {selectedFriend ? (
-          // Chat with selected friend
-          <div className="flex-1 flex flex-col">
-            {/* Chat Header */}
-            <div className="p-4 border-b border-gray-200 bg-white">
-              <div className="flex items-center">
-                <img
-                  src={selectedFriend.photoURL || '/default-avatar.png'}
-                  alt={selectedFriend.displayName}
-                  className="w-10 h-10 rounded-full mr-3"
-                />
-                <div>
-                  <h3 className="font-medium text-gray-900">
-                    {selectedFriend.displayName}
-                  </h3>
-                  <p className="text-sm text-gray-500">Online</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
-              <div className="text-center py-8">
-                <MessageCircle className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-sm text-gray-500">
-                  Start your conversation with {selectedFriend.displayName}
-                </p>
-              </div>
-            </div>
-
-            {/* Message Input */}
-            <div className="p-4 border-t border-gray-200 bg-white">
-              <div className="flex items-center space-x-3">
-                <input
-                  type="text"
-                  placeholder="Type your message..."
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
-                <button className="px-6 py-2 bg-primary-600 text-white rounded-full hover:bg-primary-700 font-medium">
-                  Send
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          // Welcome screen
-          <div className="flex-1 flex items-center justify-center bg-gray-50">
-            <div className="text-center">
-              <div className="bg-primary-100 p-6 rounded-full mb-6 inline-block">
-                <MessageCircle className="h-12 w-12 text-primary-600" />
-              </div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                Welcome to ChatKuy!
-              </h2>
-              <p className="text-gray-600 mb-6 max-w-md">
-                Connect with friends and start chatting in real-time. Search for friends by email to begin.
-              </p>
-              <div className="flex items-center justify-center space-x-4 text-sm text-gray-500">
-                <div className="flex items-center">
-                  <div className={`w-2 h-2 rounded-full mr-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`}></div>
-                  {connected ? 'Connected' : 'Disconnected'}
-                </div>
-                <div className="flex items-center">
-                  <Users className="h-4 w-4 mr-1" />
-                  {onlineUsers.length} online
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
       </div>
     </div>
   );

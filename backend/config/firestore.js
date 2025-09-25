@@ -43,7 +43,8 @@ const getCollections = () => {
   const db = getDB();
   return {
     users: db.collection("users"),
-    messages: db.collection("messages"),
+    chats: db.collection("chats"), // Tambahan untuk chat rooms
+    messages: db.collection("messages"), // Untuk pesan individual (backward compatibility)
     friendRequests: db.collection("friendRequests"),
   };
 };
@@ -124,24 +125,200 @@ const firestoreHelpers = {
     }
   },
 
-  // Save message
-  async saveMessage(senderId, receiverId, content) {
-    try {
-      const collections = getCollections();
-      const messageRef = await collections.messages.add({
-        senderId,
-        receiverId,
-        content,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        read: false,
-      });
+  // === FUNGSI CHAT REALTIME === //
 
-      return messageRef.id;
+  // Buat atau dapatkan chat room antara dua user
+  async createOrGetChatRoom(userId1, userId2) {
+    try {
+      console.log(
+        `💬 [CHAT ROOM] Mencari/membuat chat room untuk ${userId1} dan ${userId2}`
+      );
+
+      const db = getDB();
+
+      // Buat ID chat room yang konsisten (user dengan ID lebih kecil di depan)
+      const participants = [userId1, userId2].sort();
+      const chatRoomId = `${participants[0]}_${participants[1]}`;
+
+      console.log(`📝 [CHAT ROOM] ID chat room: ${chatRoomId}`);
+
+      // Cek apakah chat room sudah ada
+      const chatRef = db.collection("chats").doc(chatRoomId);
+      const chatDoc = await chatRef.get();
+
+      if (!chatDoc.exists) {
+        // Buat chat room baru
+        await chatRef.set({
+          participants,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastMessage: "",
+          lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`✅ [CHAT ROOM] Chat room baru dibuat: ${chatRoomId}`);
+      } else {
+        console.log(`📋 [CHAT ROOM] Chat room sudah ada: ${chatRoomId}`);
+      }
+
+      return chatRoomId;
     } catch (error) {
-      console.error("Error saving message:", error);
+      console.error(`❌ [CHAT ROOM] Error:`, error);
       throw error;
     }
   },
+
+  // Simpan pesan ke database dengan struktur yang lebih baik
+  async saveMessage({
+    senderId,
+    receiverId,
+    content,
+    messageType = "text",
+    chatRoomId,
+  }) {
+    try {
+      console.log(
+        `💾 [SAVE MESSAGE] Menyimpan pesan dari ${senderId} ke ${receiverId}`
+      );
+
+      const db = getDB();
+
+      // Data pesan yang akan disimpan
+      const messageData = {
+        senderId,
+        receiverId,
+        content,
+        messageType,
+        chatRoomId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        isRead: false,
+        deliveredAt: null,
+        readAt: null,
+      };
+
+      // Simpan pesan ke subcollection messages di dalam chat room
+      const messageRef = await db
+        .collection("chats")
+        .doc(chatRoomId)
+        .collection("messages")
+        .add(messageData);
+
+      // Update chat room dengan pesan terakhir
+      await db.collection("chats").doc(chatRoomId).update({
+        lastMessage: content,
+        lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(
+        `✅ [SAVE MESSAGE] Pesan disimpan dengan ID: ${messageRef.id}`
+      );
+
+      // Return data pesan dengan ID
+      return {
+        id: messageRef.id,
+        ...messageData,
+        createdAt: new Date().toISOString(), // Untuk response langsung
+      };
+    } catch (error) {
+      console.error(`❌ [SAVE MESSAGE] Error:`, error);
+      throw error;
+    }
+  },
+
+  // Ambil riwayat pesan antara dua user
+  async getMessages(userId1, userId2, limit = 50, lastMessageId = null) {
+    try {
+      console.log(
+        `📋 [GET MESSAGES] Mengambil pesan antara ${userId1} dan ${userId2}, limit: ${limit}`
+      );
+
+      const db = getDB();
+
+      // Buat chat room ID
+      const participants = [userId1, userId2].sort();
+      const chatRoomId = `${participants[0]}_${participants[1]}`;
+
+      let query = db
+        .collection("chats")
+        .doc(chatRoomId)
+        .collection("messages")
+        .orderBy("createdAt", "desc")
+        .limit(limit);
+
+      // Jika ada lastMessageId untuk pagination
+      if (lastMessageId) {
+        const lastMessageDoc = await db
+          .collection("chats")
+          .doc(chatRoomId)
+          .collection("messages")
+          .doc(lastMessageId)
+          .get();
+
+        if (lastMessageDoc.exists) {
+          query = query.startAfter(lastMessageDoc);
+        }
+      }
+
+      const messagesSnapshot = await query.get();
+
+      const messages = messagesSnapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          senderId: data.senderId,
+          receiverId: data.receiverId,
+          content: data.content,
+          messageType: data.messageType || "text",
+          createdAt:
+            data.createdAt?.toDate()?.toISOString() || new Date().toISOString(),
+          isRead: data.isRead || false,
+          deliveredAt: data.deliveredAt?.toDate()?.toISOString() || null,
+          readAt: data.readAt?.toDate()?.toISOString() || null,
+        };
+      });
+
+      // Balik urutan agar pesan lama di atas, pesan baru di bawah
+      const sortedMessages = messages.reverse();
+
+      console.log(
+        `📨 [GET MESSAGES] Ditemukan ${sortedMessages.length} pesan untuk chat room ${chatRoomId}`
+      );
+
+      return sortedMessages;
+    } catch (error) {
+      console.error(`❌ [GET MESSAGES] Error:`, error);
+      throw error;
+    }
+  },
+
+  // Tandai pesan sudah dibaca
+  async markMessageAsRead(messageId, chatRoomId, readerId) {
+    try {
+      console.log(
+        `👀 [MARK READ] Menandai pesan ${messageId} sudah dibaca oleh ${readerId}`
+      );
+
+      const db = getDB();
+
+      await db
+        .collection("chats")
+        .doc(chatRoomId)
+        .collection("messages")
+        .doc(messageId)
+        .update({
+          isRead: true,
+          readAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+      console.log(`✅ [MARK READ] Pesan ${messageId} ditandai sudah dibaca`);
+    } catch (error) {
+      console.error(`❌ [MARK READ] Error:`, error);
+      throw error;
+    }
+  },
+
+  // === FUNGSI YANG SUDAH ADA (DIPERBARUI) === //
 
   // Get messages between two users
   async getMessages(userId1, userId2, limit = 50) {
@@ -305,6 +482,37 @@ const firestoreHelpers = {
     } catch (error) {
       console.error("Error searching user by email:", error);
       throw error;
+    }
+  },
+
+  // Cek apakah dua user sudah berteman
+  async areFriends(userUid, friendUid) {
+    try {
+      console.log(
+        `🤝 [ARE FRIENDS] Cek pertemanan antara ${userUid} dan ${friendUid}`
+      );
+
+      const collections = getCollections();
+      const userDoc = await collections.users.doc(userUid).get();
+
+      if (!userDoc.exists) {
+        console.log(`❌ [ARE FRIENDS] User ${userUid} tidak ditemukan`);
+        return false;
+      }
+
+      const userData = userDoc.data();
+      const isFriend = userData.friends && userData.friends.includes(friendUid);
+
+      console.log(
+        `${isFriend ? "✅" : "❌"} [ARE FRIENDS] ${userUid} dan ${friendUid} ${
+          isFriend ? "sudah" : "belum"
+        } berteman`
+      );
+
+      return isFriend;
+    } catch (error) {
+      console.error(`❌ [ARE FRIENDS] Error:`, error);
+      return false;
     }
   },
 

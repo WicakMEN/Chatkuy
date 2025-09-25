@@ -11,6 +11,7 @@ require("./config/firestore");
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const friendsRoutes = require("./routes/friends");
+const chatRoutes = require("./routes/chat"); // Tambahan untuk chat API
 
 // Import socket handlers
 const socketAuth = require("./sockets/auth");
@@ -61,6 +62,7 @@ app.set("io", io);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/friends", friendsRoutes);
+app.use("/api/chat", chatRoutes); // Tambahan untuk chat API
 
 // Basic health check
 app.get("/", (req, res) => {
