@@ -4,21 +4,22 @@ const admin = require("firebase-admin");
 if (!admin.apps.length) {
   try {
     const serviceAccount = require("./firebase-service-account.json");
-    
+
     // Inisialisasi sederhana dan robust
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
       projectId: serviceAccount.project_id,
     });
-    
+
     console.log("🔥 Firebase Admin initialized successfully");
     console.log("📍 Project ID:", serviceAccount.project_id);
     console.log("📧 Service Account Email:", serviceAccount.client_email);
-    
   } catch (error) {
     console.error("❌ Firebase Admin initialization failed:", error.message);
     console.error("❌ Full error:", error);
-    console.log("📝 Make sure firebase-service-account.json exists in config/ folder");
+    console.log(
+      "📝 Make sure firebase-service-account.json exists in config/ folder"
+    );
     process.exit(1);
   }
 }
@@ -53,7 +54,7 @@ const firestoreHelpers = {
   async createOrUpdateUser(uid, userData) {
     try {
       console.log("🔍 createOrUpdateUser called with:", { uid, userData });
-      
+
       // Gunakan admin.firestore() langsung
       const db = admin.firestore();
       const userRef = db.collection("users").doc(uid);
@@ -74,8 +75,11 @@ const firestoreHelpers = {
       // Set data dengan merge untuk upsert
       await userRef.set(userDataToSave, { merge: true });
       console.log("✅ Data berhasil disimpan ke Firestore");
-      
-      console.log("🎉 User berhasil terdaftar/diupdate di Firestore:", userData.email);
+
+      console.log(
+        "🎉 User berhasil terdaftar/diupdate di Firestore:",
+        userData.email
+      );
 
       return { success: true, uid };
     } catch (error) {
