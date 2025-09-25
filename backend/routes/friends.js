@@ -69,7 +69,7 @@ router.post("/add", async (req, res) => {
   try {
     console.log("➕ Add friend - Request body:", req.body);
     console.log("➕ Add friend - User:", req.user.email);
-    
+
     const { friendUid } = req.body;
     const currentUserUid = req.user.uid;
 

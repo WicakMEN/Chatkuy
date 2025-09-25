@@ -8,7 +8,7 @@ export const apiCall = async (endpoint, options = {}) => {
   console.log("🌐 API Call:", url, "Options:", options);
 
   const response = await fetch(url, {
-    method: 'GET',
+    method: "GET",
     headers: {
       "Content-Type": "application/json",
     },

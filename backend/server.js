@@ -21,7 +21,7 @@ const app = express();
 // Debug middleware untuk melihat semua request
 app.use((req, res, next) => {
   console.log(`🌐 ${req.method} ${req.url}`);
-  console.log(`🔍 Content-Type:`, req.headers['content-type']);
+  console.log(`🔍 Content-Type:`, req.headers["content-type"]);
   console.log(`🔍 Headers:`, JSON.stringify(req.headers, null, 2));
   next();
 });
