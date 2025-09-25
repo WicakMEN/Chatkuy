@@ -16,22 +16,39 @@ const FriendsPage = () => {
 
   // Load friends list when component mounts
   useEffect(() => {
-    loadFriends();
-  }, []);
+    console.log('🔄 FriendsPage mounted, user state:', user ? user.email : 'No user');
+    if (user) {
+      loadFriends();
+    } else {
+      console.log('⏳ Waiting for user to be available...');
+    }
+  }, [user]); // Depend on user to reload when user changes
 
   const loadFriends = async () => {
+    console.log('👥 Loading friends list...');
+    console.log('👤 Current user:', user ? user.email : 'No user');
+    
+    if (!user) {
+      console.error('❌ No user available for loading friends');
+      setError('Please login first');
+      return;
+    }
+
     try {
       setLoading(true);
+      setError('');
       const data = await apiCallWithAuth('/api/friends/list', {}, user);
       
       if (data.success) {
+        console.log('✅ Friends loaded successfully:', data.friends.length, 'friends');
         setFriends(data.friends);
       } else {
+        console.error('❌ Failed to load friends:', data);
         setError('Failed to load friends');
       }
     } catch (error) {
-      console.error('Error loading friends:', error);
-      setError('Failed to load friends');
+      console.error('❌ Error loading friends:', error);
+      setError('Failed to load friends: ' + error.message);
     } finally {
       setLoading(false);
     }

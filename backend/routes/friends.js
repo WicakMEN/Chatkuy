@@ -16,10 +16,17 @@ router.use(verifyFirebaseToken);
 // Search user by email for adding as friend
 router.get("/search", async (req, res) => {
   try {
+    console.log(
+      "🔍 Friends search - User:",
+      req.user.email,
+      "searching for:",
+      req.query.email
+    );
     const { email } = req.query;
     const currentUserUid = req.user.uid;
 
     if (!email) {
+      console.log("❌ Friends search - No email provided");
       return res.status(400).json({
         success: false,
         message: "Email parameter is required",
@@ -99,9 +106,20 @@ router.post("/add", async (req, res) => {
 // Get friends list
 router.get("/list", async (req, res) => {
   try {
+    console.log(
+      "📋 Friends list - User:",
+      req.user.email,
+      "requesting friends list"
+    );
     const currentUserUid = req.user.uid;
 
     const friends = await getFriends(currentUserUid);
+    console.log(
+      "✅ Friends list - Found",
+      friends.length,
+      "friends for user:",
+      req.user.email
+    );
 
     res.json({
       success: true,
@@ -109,7 +127,7 @@ router.get("/list", async (req, res) => {
       count: friends.length,
     });
   } catch (error) {
-    console.error("Error getting friends list:", error);
+    console.error("❌ Error getting friends list:", error);
     res.status(500).json({
       success: false,
       message: "Failed to get friends list",
