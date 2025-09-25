@@ -33,8 +33,10 @@ const verifyFirebaseToken = async (req, res, next) => {
     req.user = {
       uid: decodedToken.uid,
       email: decodedToken.email,
-      name: decodedToken.name,
-      picture: decodedToken.picture,
+      name: decodedToken.name || decodedToken.display_name,
+      picture: decodedToken.picture || decodedToken.photo_url,
+      displayName: decodedToken.name || decodedToken.display_name,
+      photoURL: decodedToken.picture || decodedToken.photo_url,
     };
 
     next();

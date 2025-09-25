@@ -4,16 +4,21 @@ const admin = require("firebase-admin");
 if (!admin.apps.length) {
   try {
     const serviceAccount = require("./firebase-service-account.json");
+    
+    // Inisialisasi sederhana dan robust
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      databaseURL: process.env.FIREBASE_DATABASE_URL,
+      projectId: serviceAccount.project_id,
     });
+    
     console.log("🔥 Firebase Admin initialized successfully");
+    console.log("📍 Project ID:", serviceAccount.project_id);
+    console.log("📧 Service Account Email:", serviceAccount.client_email);
+    
   } catch (error) {
     console.error("❌ Firebase Admin initialization failed:", error.message);
-    console.log(
-      "📝 Make sure firebase-service-account.json exists in config/ folder"
-    );
+    console.error("❌ Full error:", error);
+    console.log("📝 Make sure firebase-service-account.json exists in config/ folder");
     process.exit(1);
   }
 }
@@ -44,27 +49,39 @@ const getCollections = () => {
 
 // Helper functions for Firestore operations
 const firestoreHelpers = {
-  // Create or update user profile
+  // Create or update user profile - Buat atau update profil user
   async createOrUpdateUser(uid, userData) {
     try {
-      const collections = getCollections();
-      const userRef = collections.users.doc(uid);
-      await userRef.set(
-        {
-          uid,
-          displayName: userData.displayName || "",
-          email: userData.email || "",
-          photoURL: userData.photoURL || "",
-          friends: userData.friends || [],
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+      console.log("🔍 createOrUpdateUser called with:", { uid, userData });
+      
+      // Gunakan admin.firestore() langsung
+      const db = admin.firestore();
+      const userRef = db.collection("users").doc(uid);
+
+      // Data yang akan disimpan
+      const userDataToSave = {
+        uid,
+        displayName: userData.displayName || "",
+        email: userData.email || "",
+        photoURL: userData.photoURL || "",
+        friends: userData.friends || [],
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      console.log("💾 Data yang akan disimpan:", userDataToSave);
+
+      // Set data dengan merge untuk upsert
+      await userRef.set(userDataToSave, { merge: true });
+      console.log("✅ Data berhasil disimpan ke Firestore");
+      
+      console.log("🎉 User berhasil terdaftar/diupdate di Firestore:", userData.email);
 
       return { success: true, uid };
     } catch (error) {
-      console.error("Error creating/updating user:", error);
+      console.error("❌ Error saat membuat/update user di Firestore:", error);
+      console.error("❌ Error details:", error.message);
+      console.error("❌ Error stack:", error.stack);
       throw error;
     }
   },
