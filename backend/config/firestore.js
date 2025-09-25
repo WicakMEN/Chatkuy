@@ -226,7 +226,7 @@ const firestoreHelpers = {
   // Get user's friends list with details
   async getFriends(userUid) {
     try {
-      const user = await this.getUser(userUid);
+      const user = await firestoreHelpers.getUser(userUid);
       if (!user || !user.friends || user.friends.length === 0) {
         return [];
       }
@@ -255,7 +255,7 @@ const firestoreHelpers = {
   // Check if two users are friends
   async areFriends(userUid, friendUid) {
     try {
-      const user = await this.getUser(userUid);
+      const user = await firestoreHelpers.getUser(userUid);
       return user && user.friends && user.friends.includes(friendUid);
     } catch (error) {
       console.error("Error checking friendship:", error);
@@ -297,7 +297,7 @@ const firestoreHelpers = {
   // Search users by email (excluding current user)
   async searchUserByEmailExcludingSelf(email, currentUserUid) {
     try {
-      const user = await this.searchUserByEmail(email);
+      const user = await firestoreHelpers.searchUserByEmail(email);
       if (user && user.uid !== currentUserUid) {
         return user;
       }
