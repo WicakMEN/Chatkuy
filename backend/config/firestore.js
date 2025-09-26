@@ -233,11 +233,17 @@ const firestoreHelpers = {
         .add(messageData);
 
       // Update chat room dengan pesan terakhir
-      await db.collection("chats").doc(chatRoomId).update({
-        lastMessage: content,
-        lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      await db
+        .collection("chats")
+        .doc(chatRoomId)
+        .update({
+          lastMessage: content,
+          lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          // Tambah/unset unreadCount per user
+          [`unreadCount.${receiverId}`]:
+            admin.firestore.FieldValue.increment(1),
+        });
 
       console.log(
         `✅ [SAVE MESSAGE] Pesan disimpan dengan ID: ${messageRef.id}`
@@ -251,6 +257,113 @@ const firestoreHelpers = {
       };
     } catch (error) {
       console.error(`❌ [SAVE MESSAGE] Error:`, error);
+      throw error;
+    }
+  },
+
+  // Ambil daftar chat rooms untuk user beserta metadata ringkas
+  async getChatRoomsForUser(userId) {
+    try {
+      const db = getDB();
+
+      const snapshot = await db
+        .collection("chats")
+        .where("participants", "array-contains", userId)
+        .get();
+
+      const rooms = [];
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+        const friendId = (data.participants || []).find((id) => id !== userId);
+        rooms.push({
+          chatRoomId: doc.id,
+          friendId,
+          lastMessage: data.lastMessage || "",
+          lastMessageAt: data.lastMessageAt?.toDate()?.toISOString() || null,
+          unreadCount: (data.unreadCount && data.unreadCount[userId]) || 0,
+          participants: data.participants || [],
+        });
+      }
+
+      // Urutkan di sisi server berdasarkan lastMessageAt desc
+      rooms.sort((a, b) => {
+        const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+        const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+        return tb - ta;
+      });
+
+      return rooms;
+    } catch (error) {
+      console.error("❌ [CHAT ROOMS] Error:", error);
+      throw error;
+    }
+  },
+
+  // Reset unread count untuk user tertentu dalam chat room
+  async resetUnreadCount(chatRoomId, userId) {
+    try {
+      const db = getDB();
+      await db
+        .collection("chats")
+        .doc(chatRoomId)
+        .set(
+          {
+            unreadCount: { [userId]: 0 },
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+    } catch (error) {
+      console.error("❌ [RESET UNREAD] Error:", error);
+      throw error;
+    }
+  },
+
+  // Tandai semua pesan dari friend -> user sebagai dibaca dan reset unreadCount
+  async markAllMessagesAsRead(userId, friendId) {
+    try {
+      const db = getDB();
+
+      // Tentukan chatRoomId
+      const participants = [userId, friendId].sort();
+      const chatRoomId = `${participants[0]}_${participants[1]}`;
+
+      const messagesRef = db
+        .collection("chats")
+        .doc(chatRoomId)
+        .collection("messages")
+        .where("receiverId", "==", userId)
+        .where("isRead", "==", false);
+
+      const snapshot = await messagesRef.get();
+
+      if (!snapshot.empty) {
+        // Batch update (maks 500 per batch)
+        let batch = db.batch();
+        let opCount = 0;
+        const commits = [];
+        for (const doc of snapshot.docs) {
+          batch.update(doc.ref, {
+            isRead: true,
+            readAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          opCount++;
+          if (opCount >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            opCount = 0;
+          }
+        }
+        commits.push(batch.commit());
+        await Promise.all(commits);
+      }
+
+      // Reset unread counter
+      await firestoreHelpers.resetUnreadCount(chatRoomId, userId);
+
+      return { chatRoomId, updated: snapshot.size };
+    } catch (error) {
+      console.error("❌ [MARK ALL READ] Error:", error);
       throw error;
     }
   },

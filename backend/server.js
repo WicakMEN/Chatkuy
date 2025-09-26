@@ -101,4 +101,23 @@ server.listen(PORT, () => {
   console.log(`📱 CORS enabled for: ${corsOptions.origin}`);
 });
 
+// Graceful error handling for common server errors
+server.on("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    console.error(`\n❌ Port ${PORT} sudah dipakai (EADDRINUSE).`);
+    console.error("👉 Solusi cepat (Windows PowerShell):");
+    console.error("  1) Cari PID:   netstat -ano | findstr :" + PORT);
+    console.error("  2) Kill PID:   taskkill /PID <PID> /F");
+    console.error(
+      "  Atau jalankan di terminal yang masih berjalan server sebelumnya: Ctrl+C untuk menghentikan."
+    );
+    console.error(
+      "  Alternatif sementara: set PORT lain, mis. $env:PORT=3002; node server.js (jangan lupa update VITE_API_BASE_URL di frontend)."
+    );
+    process.exit(1);
+  }
+  console.error("Server error:", err);
+  process.exit(1);
+});
+
 module.exports = { app, server, io };

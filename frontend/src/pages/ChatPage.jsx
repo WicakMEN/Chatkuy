@@ -21,6 +21,9 @@ const ChatPage = () => {
     connected,
     onlineUsers,
     messages,
+    chatRooms,
+    fetchChatRooms,
+    resetUnreadForFriend,
     sendMessage,
     getMessages
   } = useSocket();
@@ -33,18 +36,20 @@ const ChatPage = () => {
   // Load daftar teman saat component mount atau user berubah
   useEffect(() => {
     if (user) {
-      console.log('👥 [CHAT PAGE] User login detected, loading friends...');
+      console.log('👥 [CHAT PAGE] User login detected, loading friends & chat rooms...');
       loadFriends();
+      fetchChatRooms();
     }
-  }, [user]); // Tambah dependency user
+  }, [user, fetchChatRooms]);
 
   // Load riwayat pesan saat pilih teman
   useEffect(() => {
     if (selectedFriend) {
       console.log(`📋 [CHAT PAGE] Memuat pesan untuk teman: ${selectedFriend.uid}`);
       getMessages(selectedFriend.uid);
+      resetUnreadForFriend(selectedFriend.uid);
     }
-  }, [selectedFriend, getMessages]);
+  }, [selectedFriend, getMessages, resetUnreadForFriend]);
 
   // Auto scroll saat ada pesan baru
   useEffect(() => {
@@ -101,8 +106,21 @@ const ChatPage = () => {
     return onlineUsers.some(user => user.userId === userId);
   };
 
-  // Get current friend's messages
-  const currentMessages = selectedFriend ? (messages[selectedFriend.uid] || []) : [];
+  // Get current friend's messages and ensure uniqueness by id
+  const currentMessages = (() => {
+    if (!selectedFriend) return [];
+    const list = messages[selectedFriend.uid] || [];
+    const seen = new Set();
+    const unique = [];
+    for (const m of list) {
+      const key = m.id || m.tempId || `${m.senderId}-${m.createdAt}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(m);
+      }
+    }
+    return unique;
+  })();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -154,7 +172,7 @@ const ChatPage = () => {
             </div>
           </div>
 
-          {/* Daftar Teman */}
+          {/* Daftar Chat ala WhatsApp */}
           <div className="flex-1 overflow-y-auto">
             {loadingFriends ? (
               <div className="p-4 text-center">
@@ -174,35 +192,44 @@ const ChatPage = () => {
               </div>
             ) : (
               <div className="py-2">
-                {friends.map(friend => (
-                  <div
-                    key={friend.uid}
-                    onClick={() => setSelectedFriend(friend)}
-                    className={`flex items-center p-3 hover:bg-gray-100 cursor-pointer border-l-4 ${selectedFriend?.uid === friend.uid
-                        ? 'bg-blue-50 border-blue-500'
-                        : 'border-transparent'
-                      }`}
-                  >
-                    <div className="relative">
-                      <img
-                        src={friend.photoURL || '/default-avatar.png'}
-                        alt={friend.displayName}
-                        className="w-12 h-12 rounded-full"
-                      />
-                      {/* Online indicator */}
-                      <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${isUserOnline(friend.uid) ? 'bg-green-400' : 'bg-gray-300'
-                        }`}></div>
+                {chatRooms.map((room) => {
+                  const friend = friends.find(f => f.uid === room.friendId) || { uid: room.friendId, displayName: 'Unknown', photoURL: '' };
+                  const active = selectedFriend?.uid === friend.uid;
+                  return (
+                    <div
+                      key={room.chatRoomId || friend.uid}
+                      onClick={() => setSelectedFriend(friend)}
+                      className={`flex items-center p-3 hover:bg-gray-100 cursor-pointer border-l-4 ${active ? 'bg-blue-50 border-blue-500' : 'border-transparent'}`}
+                    >
+                      <div className="relative">
+                        <img
+                          src={friend.photoURL || '/default-avatar.png'}
+                          alt={friend.displayName}
+                          className="w-12 h-12 rounded-full"
+                        />
+                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${isUserOnline(friend.uid) ? 'bg-green-400' : 'bg-gray-300'}`}></div>
+                      </div>
+                      <div className="ml-3 flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-gray-900 truncate">{friend.displayName}</p>
+                          {room.lastMessageAt && (
+                            <span className="text-[10px] text-gray-400 ml-2">
+                              {new Date(room.lastMessageAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-gray-500 truncate max-w-[180px]">{room.lastMessage || ''}</p>
+                          {room.unreadCount > 0 && (
+                            <span className="ml-2 bg-green-500 text-white text-[10px] px-2 py-0.5 rounded-full min-w-[20px] text-center">
+                              {room.unreadCount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div className="ml-3 flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {friend.displayName}
-                      </p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {isUserOnline(friend.uid) ? 'Online' : 'Offline'}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -244,7 +271,7 @@ const ChatPage = () => {
 
                     return (
                       <div
-                        key={message.id || message.tempId}
+                        key={message.id || message.tempId || `${message.senderId}-${message.createdAt}`}
                         className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
                       >
                         <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${isMe

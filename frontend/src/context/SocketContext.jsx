@@ -20,6 +20,7 @@ export const SocketProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [messages, setMessages] = useState({}); // Format: { friendId: [messages] }
+  const [chatRooms, setChatRooms] = useState([]); // Untuk sidebar WA-like
   const [typingUsers, setTypingUsers] = useState({}); // Format: { userId: true/false }
   const { user, idToken } = useAuth();
 
@@ -105,6 +106,21 @@ export const SocketProvider = ({ children }) => {
           };
         });
 
+        // Update daftar chat/sidebar (last message + unread)
+        setChatRooms(prev => {
+          const friendId = messageData.senderId;
+          const existing = prev.find(r => r.friendId === friendId);
+          const updated = {
+            friendId,
+            lastMessage: messageData.content,
+            lastMessageAt: messageData.createdAt,
+            unreadCount: (existing?.unreadCount || 0) + 1,
+            chatRoomId: messageData.chatRoomId,
+          };
+          const others = prev.filter(r => r.friendId !== friendId);
+          return [updated, ...others].sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
+        });
+
         // Play notification sound (opsional)
         // playNotificationSound();
       });
@@ -118,14 +134,23 @@ export const SocketProvider = ({ children }) => {
           const receiverId = messageData.receiverId;
           const currentMessages = prev[receiverId] || [];
 
-          return {
-            ...prev,
-            [receiverId]: currentMessages.map(msg =>
-              msg.tempId === messageData.tempId
-                ? { ...messageData, status: 'sent' }
-                : msg
-            )
-          };
+          // Ganti optimistic message berdasarkan tempId jika ada
+          let replaced = false;
+          const replacedList = currentMessages.map(msg => {
+            if (messageData.tempId && msg.tempId === messageData.tempId) {
+              replaced = true;
+              return { ...msg, ...messageData, id: messageData.id, status: 'sent' };
+            }
+            return msg;
+          });
+
+          // Jika tidak ada yang terganti (mis. refresh), hindari duplikasi id
+          const alreadyExists = replacedList.some(m => m.id === messageData.id);
+          const nextList = replaced
+            ? replacedList
+            : (alreadyExists ? replacedList : [...replacedList, { ...messageData, status: 'sent' }]);
+
+          return { ...prev, [receiverId]: nextList };
         });
       });
 
@@ -133,10 +158,25 @@ export const SocketProvider = ({ children }) => {
       newSocket.on('messages_history', (data) => {
         console.log('📋 [SOCKET] Terima riwayat pesan:', data);
 
+        // Pastikan list unik berdasarkan id
+        const unique = [];
+        const seen = new Set();
+        for (const m of data.messages || []) {
+          if (m.id && !seen.has(m.id)) {
+            seen.add(m.id);
+            unique.push(m);
+          } else if (!m.id) {
+            unique.push(m);
+          }
+        }
+
         setMessages(prev => ({
           ...prev,
-          [data.friendId]: data.messages
+          [data.friendId]: unique
         }));
+
+        // Reset unread count secara optimistic saat membuka chat
+        setChatRooms(prev => prev.map(r => r.friendId === data.friendId ? { ...r, unreadCount: 0 } : r));
       });
 
       // Event: User sedang mengetik
@@ -199,7 +239,8 @@ export const SocketProvider = ({ children }) => {
         setSocket(null);
         setConnected(false);
         setMessages({});
-        setTypingUsers({});
+  setTypingUsers({});
+  setChatRooms([]);
       };
     } else {
       // Reset state saat user logout
@@ -208,7 +249,8 @@ export const SocketProvider = ({ children }) => {
       setConnected(false);
       setMessages({});
       setTypingUsers({});
-      setOnlineUsers([]);
+    setOnlineUsers([]);
+    setChatRooms([]);
     }
   }, [user, idToken]);
 
@@ -241,6 +283,20 @@ export const SocketProvider = ({ children }) => {
       [receiverId]: [...(prev[receiverId] || []), optimisticMessage]
     }));
 
+    // Update chatRooms locally
+    setChatRooms(prev => {
+      const existing = prev.find(r => r.friendId === receiverId);
+      const updated = {
+        friendId: receiverId,
+        lastMessage: content,
+        lastMessageAt: optimisticMessage.createdAt,
+        unreadCount: 0,
+        chatRoomId: existing?.chatRoomId,
+      };
+      const others = prev.filter(r => r.friendId !== receiverId);
+      return [updated, ...others].sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
+    });
+
     // Kirim pesan ke server
     socket.emit('send_message', { receiverId, content, messageType, tempId });
 
@@ -256,6 +312,38 @@ export const SocketProvider = ({ children }) => {
     console.log(`📋 [SOCKET] Mengambil riwayat pesan dengan ${friendId}`);
     socket.emit('get_messages', { friendId, limit });
   }, [socket, connected]);
+
+  // Ambil daftar chat rooms (untuk sidebar)
+  const fetchChatRooms = useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'}/api/chat/rooms`, {
+        headers: { Authorization: `Bearer ${await user.getIdToken()}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Sort desc by lastMessageAt
+        const sorted = (data.data || []).sort((a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0));
+        setChatRooms(sorted);
+      }
+    } catch (e) {
+      console.error('❌ [SOCKET] Gagal mengambil chat rooms:', e);
+    }
+  }, [user]);
+
+  // Reset unread untuk friend tertentu (server + client)
+  const resetUnreadForFriend = useCallback(async (friendId) => {
+    setChatRooms(prev => prev.map(r => r.friendId === friendId ? { ...r, unreadCount: 0 } : r));
+    if (!user) return;
+    try {
+      await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'}/api/chat/read-all/${friendId}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${await user.getIdToken()}` }
+      });
+    } catch (e) {
+      console.error('❌ [SOCKET] Gagal reset unread:', e);
+    }
+  }, [user]);
 
   // Fungsi: Mulai mengetik
   const startTyping = useCallback((receiverId) => {
@@ -295,9 +383,12 @@ export const SocketProvider = ({ children }) => {
     connected,
     onlineUsers,
     messages,
+    chatRooms,
     typingUsers,
     sendMessage,
     getMessages,
+    fetchChatRooms,
+    resetUnreadForFriend,
     startTyping,
     stopTyping,
     markAsRead,

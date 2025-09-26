@@ -5,6 +5,8 @@ const {
   createOrGetChatRoom,
   areFriends,
   markMessageAsRead,
+  getChatRoomsForUser,
+  markAllMessagesAsRead,
 } = require("../config/firestore");
 const verifyFirebaseToken = require("../config/auth");
 
@@ -119,10 +121,7 @@ router.get("/rooms", async (req, res) => {
 
   try {
     const userId = req.user.uid;
-
-    // TODO: Implementasi fungsi getChatRooms di firestore.js
-    // Untuk sementara return empty array
-    const chatRooms = [];
+    const chatRooms = await getChatRoomsForUser(userId);
 
     console.log(
       `✅ [CHAT API] Berhasil mengambil ${chatRooms.length} chat rooms untuk ${userId}`
@@ -139,6 +138,36 @@ router.get("/rooms", async (req, res) => {
       message: "Gagal mengambil daftar chat rooms",
       error: error.message,
     });
+  }
+});
+
+// POST /api/chat/read-all/:friendId - Tandai semua pesan dari friend sudah dibaca
+router.post("/read-all/:friendId", async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const { friendId } = req.params;
+    if (!friendId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "friendId wajib diisi" });
+    }
+
+    // Cek teman dulu
+    const isFriends = await areFriends(userId, friendId);
+    if (!isFriends) {
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: "Hanya bisa membaca chat dengan teman",
+        });
+    }
+
+    const result = await markAllMessagesAsRead(userId, friendId);
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    console.error("❌ [CHAT API] read-all error:", error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 });
 

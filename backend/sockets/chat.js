@@ -83,9 +83,10 @@ const chatSocket = (io, socket) => {
         );
       }
 
-      // Kirim konfirmasi ke pengirim
+      // Kirim konfirmasi ke pengirim (sertakan tempId dari request agar UI bisa mengganti optimistic message)
       socket.emit("message_sent", {
         ...messageData,
+        tempId: data.tempId,
         status: "sent",
         deliveredAt: new Date().toISOString(),
       });
