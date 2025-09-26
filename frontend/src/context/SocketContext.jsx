@@ -27,7 +27,11 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     if (user && idToken) {
       console.log('🔌 [SOCKET] Menghubungkan socket untuk user:', user.email);
-      
+
+      // Reset messages saat user berubah (login baru)
+      console.log('🔄 [SOCKET] Reset messages untuk user baru');
+      setMessages({});
+
       // Inisialisasi koneksi socket dengan autentikasi
       const newSocket = io(import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001', {
         auth: {
@@ -43,7 +47,7 @@ export const SocketProvider = ({ children }) => {
       newSocket.on('connect', () => {
         console.log('✅ [SOCKET] Berhasil terhubung ke server');
         setConnected(true);
-        
+
         // Emit status user online
         newSocket.emit('user_online');
       });
@@ -82,19 +86,19 @@ export const SocketProvider = ({ children }) => {
       // Event: Terima pesan baru
       newSocket.on('receive_message', (messageData) => {
         console.log('📨 [SOCKET] Terima pesan baru:', messageData);
-        
+
         // Tambahkan pesan ke state messages
         setMessages(prev => {
           const senderId = messageData.senderId;
           const currentMessages = prev[senderId] || [];
-          
+
           // Cek duplikasi berdasarkan ID pesan
           const isDuplicate = currentMessages.some(msg => msg.id === messageData.id);
           if (isDuplicate) {
             console.log('⚠️ [SOCKET] Pesan duplikat diabaikan:', messageData.id);
             return prev;
           }
-          
+
           return {
             ...prev,
             [senderId]: [...currentMessages, messageData]
@@ -108,16 +112,16 @@ export const SocketProvider = ({ children }) => {
       // Event: Konfirmasi pesan terkirim
       newSocket.on('message_sent', (messageData) => {
         console.log('✅ [SOCKET] Pesan berhasil terkirim:', messageData);
-        
+
         // Update status pesan di UI jadi "sent"
         setMessages(prev => {
           const receiverId = messageData.receiverId;
           const currentMessages = prev[receiverId] || [];
-          
+
           return {
             ...prev,
-            [receiverId]: currentMessages.map(msg => 
-              msg.tempId === messageData.tempId 
+            [receiverId]: currentMessages.map(msg =>
+              msg.tempId === messageData.tempId
                 ? { ...messageData, status: 'sent' }
                 : msg
             )
@@ -128,7 +132,7 @@ export const SocketProvider = ({ children }) => {
       // Event: Riwayat pesan
       newSocket.on('messages_history', (data) => {
         console.log('📋 [SOCKET] Terima riwayat pesan:', data);
-        
+
         setMessages(prev => ({
           ...prev,
           [data.friendId]: data.messages
@@ -138,7 +142,7 @@ export const SocketProvider = ({ children }) => {
       // Event: User sedang mengetik
       newSocket.on('user_typing', (data) => {
         console.log('⌨️ [SOCKET] User typing:', data);
-        
+
         setTypingUsers(prev => ({
           ...prev,
           [data.userId]: data.isTyping
@@ -169,19 +173,19 @@ export const SocketProvider = ({ children }) => {
       // Event: Pesan sudah dibaca
       newSocket.on('message_read', (data) => {
         console.log('👀 [SOCKET] Pesan sudah dibaca:', data);
-        
+
         // Update status pesan di UI
         setMessages(prev => {
           const updatedMessages = {};
-          
+
           Object.keys(prev).forEach(friendId => {
-            updatedMessages[friendId] = prev[friendId].map(msg => 
-              msg.id === data.messageId 
+            updatedMessages[friendId] = prev[friendId].map(msg =>
+              msg.id === data.messageId
                 ? { ...msg, isRead: true, readAt: data.readAt }
                 : msg
             );
           });
-          
+
           return updatedMessages;
         });
       });
@@ -197,6 +201,14 @@ export const SocketProvider = ({ children }) => {
         setMessages({});
         setTypingUsers({});
       };
+    } else {
+      // Reset state saat user logout
+      console.log('🔄 [SOCKET] User logout - reset socket state');
+      setSocket(null);
+      setConnected(false);
+      setMessages({});
+      setTypingUsers({});
+      setOnlineUsers([]);
     }
   }, [user, idToken]);
 
@@ -211,7 +223,7 @@ export const SocketProvider = ({ children }) => {
 
     // Buat temporary ID untuk optimistic UI
     const tempId = `temp_${Date.now()}_${Math.random()}`;
-    
+
     // Tambahkan pesan ke UI secara optimistic
     const optimisticMessage = {
       id: tempId,
@@ -231,7 +243,7 @@ export const SocketProvider = ({ children }) => {
 
     // Kirim pesan ke server
     socket.emit('send_message', { receiverId, content, messageType, tempId });
-    
+
   }, [socket, connected, user?.uid]);
 
   // Fungsi: Ambil riwayat pesan
@@ -248,7 +260,7 @@ export const SocketProvider = ({ children }) => {
   // Fungsi: Mulai mengetik
   const startTyping = useCallback((receiverId) => {
     if (!socket || !connected) return;
-    
+
     console.log(`⌨️ [SOCKET] Mulai mengetik ke ${receiverId}`);
     socket.emit('typing_start', { receiverId });
   }, [socket, connected]);
@@ -256,7 +268,7 @@ export const SocketProvider = ({ children }) => {
   // Fungsi: Berhenti mengetik
   const stopTyping = useCallback((receiverId) => {
     if (!socket || !connected) return;
-    
+
     console.log(`⌨️ [SOCKET] Berhenti mengetik ke ${receiverId}`);
     socket.emit('typing_stop', { receiverId });
   }, [socket, connected]);
@@ -264,7 +276,7 @@ export const SocketProvider = ({ children }) => {
   // Fungsi: Tandai pesan sudah dibaca
   const markAsRead = useCallback((messageId, senderId) => {
     if (!socket || !connected) return;
-    
+
     console.log(`👀 [SOCKET] Tandai pesan ${messageId} sudah dibaca`);
     socket.emit('mark_as_read', { messageId, senderId });
   }, [socket, connected]);
@@ -298,3 +310,5 @@ export const SocketProvider = ({ children }) => {
     </SocketContext.Provider>
   );
 };
+
+export default SocketContext;

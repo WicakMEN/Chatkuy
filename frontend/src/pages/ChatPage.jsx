@@ -11,18 +11,18 @@ const ChatPage = () => {
   const [friends, setFriends] = useState([]);
   const [messageText, setMessageText] = useState('');
   const [loadingFriends, setLoadingFriends] = useState(true);
-  
+
   // Ref untuk auto scroll
   const messagesEndRef = useRef(null);
-  
+
   // Context hooks
   const { user, logout } = useAuth();
-  const { 
-    connected, 
-    onlineUsers, 
-    messages, 
-    sendMessage, 
-    getMessages 
+  const {
+    connected,
+    onlineUsers,
+    messages,
+    sendMessage,
+    getMessages
   } = useSocket();
 
   // Auto scroll ke pesan terbaru
@@ -30,10 +30,13 @@ const ChatPage = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Load daftar teman saat component mount
+  // Load daftar teman saat component mount atau user berubah
   useEffect(() => {
-    loadFriends();
-  }, []);
+    if (user) {
+      console.log('👥 [CHAT PAGE] User login detected, loading friends...');
+      loadFriends();
+    }
+  }, [user]); // Tambah dependency user
 
   // Load riwayat pesan saat pilih teman
   useEffect(() => {
@@ -53,9 +56,9 @@ const ChatPage = () => {
     try {
       console.log('👥 [CHAT PAGE] Memuat daftar teman...');
       setLoadingFriends(true);
-      
+
       const response = await apiCallWithAuth('/api/friends/list', {}, user);
-      
+
       if (response.success) {
         setFriends(response.friends || []);
         console.log(`✅ [CHAT PAGE] Berhasil memuat ${response.friends?.length || 0} teman`);
@@ -79,16 +82,16 @@ const ChatPage = () => {
   // Fungsi: Kirim pesan
   const handleSendMessage = (e) => {
     e.preventDefault();
-    
+
     if (!messageText.trim() || !selectedFriend) {
       return;
     }
 
     console.log(`📤 [CHAT PAGE] Mengirim pesan ke ${selectedFriend.displayName}: ${messageText}`);
-    
+
     // Kirim pesan via socket
     sendMessage(selectedFriend.uid, messageText.trim());
-    
+
     // Clear input
     setMessageText('');
   };
@@ -117,14 +120,14 @@ const ChatPage = () => {
                 <h1 className="text-xl font-bold text-gray-900">ChatKuy</h1>
               </div>
               <div className="flex items-center space-x-2">
-                <button 
+                <button
                   onClick={() => window.location.href = '/friends'}
                   className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-md"
                   title="Kelola Teman"
                 >
                   <Users className="h-4 w-4" />
                 </button>
-                <button 
+                <button
                   onClick={handleLogout}
                   className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-md"
                   title="Logout"
@@ -162,7 +165,7 @@ const ChatPage = () => {
               <div className="p-4 text-center">
                 <Users className="h-12 w-12 text-gray-300 mx-auto mb-3" />
                 <p className="text-sm text-gray-500">Belum ada teman</p>
-                <button 
+                <button
                   onClick={() => window.location.href = '/friends'}
                   className="text-blue-600 text-sm font-medium mt-2 hover:underline"
                 >
@@ -175,11 +178,10 @@ const ChatPage = () => {
                   <div
                     key={friend.uid}
                     onClick={() => setSelectedFriend(friend)}
-                    className={`flex items-center p-3 hover:bg-gray-100 cursor-pointer border-l-4 ${
-                      selectedFriend?.uid === friend.uid 
-                        ? 'bg-blue-50 border-blue-500' 
+                    className={`flex items-center p-3 hover:bg-gray-100 cursor-pointer border-l-4 ${selectedFriend?.uid === friend.uid
+                        ? 'bg-blue-50 border-blue-500'
                         : 'border-transparent'
-                    }`}
+                      }`}
                   >
                     <div className="relative">
                       <img
@@ -188,9 +190,8 @@ const ChatPage = () => {
                         className="w-12 h-12 rounded-full"
                       />
                       {/* Online indicator */}
-                      <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${
-                        isUserOnline(friend.uid) ? 'bg-green-400' : 'bg-gray-300'
-                      }`}></div>
+                      <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${isUserOnline(friend.uid) ? 'bg-green-400' : 'bg-gray-300'
+                        }`}></div>
                     </div>
                     <div className="ml-3 flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">
@@ -240,24 +241,22 @@ const ChatPage = () => {
                 ) : (
                   currentMessages.map((message) => {
                     const isMe = message.senderId === user?.uid;
-                    
+
                     return (
                       <div
                         key={message.id || message.tempId}
                         className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
                       >
-                        <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                          isMe 
-                            ? 'bg-blue-600 text-white' 
+                        <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${isMe
+                            ? 'bg-blue-600 text-white'
                             : 'bg-white text-gray-900 border'
-                        }`}>
-                          <p className="text-sm">{message.content}</p>
-                          <p className={`text-xs mt-1 ${
-                            isMe ? 'text-blue-200' : 'text-gray-400'
                           }`}>
-                            {new Date(message.createdAt).toLocaleTimeString('id-ID', { 
-                              hour: '2-digit', 
-                              minute: '2-digit' 
+                          <p className="text-sm">{message.content}</p>
+                          <p className={`text-xs mt-1 ${isMe ? 'text-blue-200' : 'text-gray-400'
+                            }`}>
+                            {new Date(message.createdAt).toLocaleTimeString('id-ID', {
+                              hour: '2-digit',
+                              minute: '2-digit'
                             })}
                           </p>
                         </div>
@@ -281,11 +280,10 @@ const ChatPage = () => {
                   <button
                     type="submit"
                     disabled={!messageText.trim() || !connected}
-                    className={`p-2 rounded-full ${
-                      messageText.trim() && connected
+                    className={`p-2 rounded-full ${messageText.trim() && connected
                         ? 'bg-blue-600 text-white hover:bg-blue-700'
                         : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
+                      }`}
                   >
                     <Send className="h-6 w-6" />
                   </button>

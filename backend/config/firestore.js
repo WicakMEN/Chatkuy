@@ -60,16 +60,45 @@ const firestoreHelpers = {
       const db = admin.firestore();
       const userRef = db.collection("users").doc(uid);
 
-      // Data yang akan disimpan
+      // Cek apakah dokumen user sudah ada untuk mencegah overwrite tidak sengaja
+      const existingSnap = await userRef.get();
+      const exists = existingSnap.exists;
+      const existingData = exists ? existingSnap.data() : {};
+
+      // Bangun payload update secara hati-hati agar tidak mengosongkan field lama
       const userDataToSave = {
         uid,
-        displayName: userData.displayName || "",
-        email: userData.email || "",
-        photoURL: userData.photoURL || "",
-        friends: userData.friends || [],
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        // Set hanya jika ada nilai yang diberikan; jika dokumen belum ada, inisialisasi string kosong
+        ...(userData.displayName !== undefined
+          ? { displayName: userData.displayName }
+          : exists
+          ? {}
+          : { displayName: "" }),
+        ...(userData.email !== undefined
+          ? { email: userData.email }
+          : exists
+          ? {}
+          : { email: "" }),
+        ...(userData.photoURL !== undefined
+          ? { photoURL: userData.photoURL }
+          : exists
+          ? {}
+          : { photoURL: "" }),
+        // createdAt hanya diset saat pertama kali dibuat
+        ...(exists
+          ? {}
+          : { createdAt: admin.firestore.FieldValue.serverTimestamp() }),
+        // Selalu update updatedAt
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
+
+      // Penting: jangan overwrite friends saat login kalau tidak dikirimkan
+      if (userData.friends !== undefined) {
+        userDataToSave.friends = userData.friends;
+      } else if (!exists) {
+        // Inisialisasi kosong hanya pada pembuatan pertama
+        userDataToSave.friends = [];
+      }
 
       console.log("💾 Data yang akan disimpan:", userDataToSave);
 
@@ -79,7 +108,7 @@ const firestoreHelpers = {
 
       console.log(
         "🎉 User berhasil terdaftar/diupdate di Firestore:",
-        userData.email
+        userData.email || existingData.email || "(tanpa email)"
       );
 
       return { success: true, uid };
@@ -320,30 +349,6 @@ const firestoreHelpers = {
 
   // === FUNGSI YANG SUDAH ADA (DIPERBARUI) === //
 
-  // Get messages between two users
-  async getMessages(userId1, userId2, limit = 50) {
-    try {
-      const collections = getCollections();
-      const messagesSnapshot = await collections.messages
-        .where("senderId", "in", [userId1, userId2])
-        .where("receiverId", "in", [userId1, userId2])
-        .orderBy("createdAt", "desc")
-        .limit(limit)
-        .get();
-
-      const messages = messagesSnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate(),
-      }));
-
-      return messages.reverse(); // Return in chronological order
-    } catch (error) {
-      console.error("Error getting messages:", error);
-      throw error;
-    }
-  },
-
   // Add Friend System Functions
 
   // Add friend (mutual friendship, no approval needed)
@@ -400,43 +405,65 @@ const firestoreHelpers = {
     }
   },
 
-  // Get user's friends list with details
+  // Get user's friends list with details - Ambil daftar teman dengan detail lengkap
   async getFriends(userUid) {
     try {
-      const user = await firestoreHelpers.getUser(userUid);
-      if (!user || !user.friends || user.friends.length === 0) {
+      console.log(
+        `👥 [GET FRIENDS] Mengambil daftar teman untuk user: ${userUid}`
+      );
+
+      const collections = getCollections();
+      const userDoc = await collections.users.doc(userUid).get();
+
+      if (!userDoc.exists) {
+        console.log(`❌ [GET FRIENDS] User ${userUid} tidak ditemukan`);
         return [];
       }
 
-      const collections = getCollections();
+      const userData = userDoc.data();
+      console.log(`📊 [GET FRIENDS] User data:`, {
+        email: userData.email,
+        friendsCount: userData.friends ? userData.friends.length : 0,
+      });
+
+      if (!userData.friends || userData.friends.length === 0) {
+        console.log(`📭 [GET FRIENDS] User ${userUid} tidak memiliki teman`);
+        return [];
+      }
+
       const friendsData = [];
 
-      // Get friend details
-      for (const friendUid of user.friends) {
+      // Ambil detail setiap teman
+      for (const friendUid of userData.friends) {
+        console.log(`🔍 [GET FRIENDS] Mengambil detail teman: ${friendUid}`);
         const friendDoc = await collections.users.doc(friendUid).get();
         if (friendDoc.exists) {
+          const friendData = friendDoc.data();
           friendsData.push({
             uid: friendUid,
-            ...friendDoc.data(),
+            displayName: friendData.displayName,
+            email: friendData.email,
+            photoURL: friendData.photoURL,
+            createdAt: friendData.createdAt,
+            updatedAt: friendData.updatedAt,
           });
+          console.log(
+            `✅ [GET FRIENDS] Detail teman berhasil diambil: ${friendData.email}`
+          );
+        } else {
+          console.log(
+            `⚠️ [GET FRIENDS] Teman ${friendUid} tidak ditemukan di database`
+          );
         }
       }
 
+      console.log(
+        `🎉 [GET FRIENDS] Berhasil mengambil ${friendsData.length} teman untuk ${userData.email}`
+      );
       return friendsData;
     } catch (error) {
-      console.error("Error getting friends:", error);
+      console.error(`❌ [GET FRIENDS] Error:`, error);
       throw error;
-    }
-  },
-
-  // Check if two users are friends
-  async areFriends(userUid, friendUid) {
-    try {
-      const user = await firestoreHelpers.getUser(userUid);
-      return user && user.friends && user.friends.includes(friendUid);
-    } catch (error) {
-      console.error("Error checking friendship:", error);
-      return false;
     }
   },
 
